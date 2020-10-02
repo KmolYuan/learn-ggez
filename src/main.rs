@@ -75,10 +75,7 @@ trait ModuloSigned {
 /// that also has an output type of T, and that can be cloned. These are the bounds
 /// that we need in order to implement a modulus function that works for negative numbers
 /// as well.
-impl<T> ModuloSigned for T
-    where
-        T: std::ops::Add<Output = T> + std::ops::Rem<Output = T> + Clone,
-{
+impl<T: std::ops::Add<Output=T> + std::ops::Rem<Output=T> + Clone> ModuloSigned for T {
     fn modulo(&self, n: T) -> T {
         // Because of our trait bounds, we can now apply these operators.
         (self.clone() % n.clone() + n.clone()) % n.clone()
@@ -94,15 +91,12 @@ impl GridPosition {
 
     /// As well as a helper function that will give us a random `GridPosition` from
     /// `(0, 0)` to `(max_x, max_y)`
-    pub fn random(max_x: i16, max_y: i16) -> Self {
+    pub fn random() -> Self {
         let mut rng = rand::thread_rng();
-        // We can use `.into()` to convert from `(i16, i16)` to a `GridPosition` since
-        // we implement `From<(i16, i16)>` for `GridPosition` below.
-        (
-            rng.gen_range::<i16, i16, i16>(0, max_x),
-            rng.gen_range::<i16, i16, i16>(0, max_y),
-        )
-            .into()
+        Self {
+            x: rng.gen_range(0i16, GRID_SIZE.0),
+            y: rng.gen_range(0i16, GRID_SIZE.1),
+        }
     }
 
     /// We'll make another helper function that takes one grid position and returns a new one after
@@ -132,14 +126,6 @@ impl From<GridPosition> for graphics::Rect {
             GRID_CELL_SIZE.0 as i32,
             GRID_CELL_SIZE.1 as i32,
         )
-    }
-}
-
-/// And here we implement `From` again to allow us to easily convert between
-/// `(i16, i16)` and a `GridPosition`.
-impl From<(i16, i16)> for GridPosition {
-    fn from(pos: (i16, i16)) -> Self {
-        GridPosition { x: pos.0, y: pos.1 }
     }
 }
 
@@ -176,6 +162,10 @@ impl Direction {
             KeyCode::Down => Some(Direction::Down),
             KeyCode::Left => Some(Direction::Left),
             KeyCode::Right => Some(Direction::Right),
+            KeyCode::W => Some(Direction::Up),
+            KeyCode::S => Some(Direction::Down),
+            KeyCode::A => Some(Direction::Left),
+            KeyCode::D => Some(Direction::Right),
             _ => None,
         }
     }
@@ -184,7 +174,7 @@ impl Direction {
 /// This is mostly just a semantic abstraction over a `GridPosition` to represent
 /// a segment of the snake. It could be useful to, say, have each segment contain its
 /// own color or something similar. This is an exercise left up to the reader ;)
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 struct Segment {
     pos: GridPosition,
 }
@@ -215,16 +205,16 @@ impl Food {
     /// Note: this method of drawing does not scale. If you need to render
     /// a large number of shapes, use a SpriteBatch. This approach is fine for
     /// this example since there are a fairly limited number of calls.
-    fn draw(&self, ctx: &mut Context) -> GameResult<()> {
+    fn draw(&self, ctx: &mut Context) -> GameResult {
         // First we set the color to draw with, in this case all food will be
         // colored blue.
-        let color = [0.0, 0.0, 1.0, 1.0].into();
+        let color = graphics::Color::new(0.0, 0.0, 1.0, 1.0);
         // Then we draw a rectangle with the Fill draw mode, and we convert the
         // Food's position into a `ggez::Rect` using `.into()` which we can do
         // since we implemented `From<GridPosition>` for `Rect` earlier.
         let rectangle =
             graphics::Mesh::new_rectangle(ctx, graphics::DrawMode::fill(), self.pos.into(), color)?;
-        graphics::draw(ctx, &rectangle, (ggez::mint::Point2 { x: 0.0, y: 0.0 },))
+        graphics::draw(ctx, &rectangle, graphics::DrawParam::default())
     }
 }
 
@@ -267,14 +257,14 @@ impl Snake {
         let mut body = LinkedList::new();
         // Our snake will initially have a head and one body segment,
         // and will be moving to the right.
-        body.push_back(Segment::new((pos.x - 1, pos.y).into()));
-        Snake {
+        body.push_back(Segment::new(GridPosition::new(pos.x - 1, pos.y)));
+        Self {
             head: Segment::new(pos),
             dir: Direction::Right,
             last_update_dir: Direction::Right,
             body,
             ate: None,
-            next_dir: None
+            next_dir: None,
         }
     }
 
@@ -347,7 +337,7 @@ impl Snake {
     /// Again, note that this approach to drawing is fine for the limited scope of this
     /// example, but larger scale games will likely need a more optimized render path
     /// using SpriteBatch or something similar that batches draw calls.
-    fn draw(&self, ctx: &mut Context) -> GameResult<()> {
+    fn draw(&self, ctx: &mut Context) -> GameResult {
         // We first iterate through the body segments and draw them.
         for seg in self.body.iter() {
             // Again we set the color (in this case an orangey color)
@@ -356,9 +346,9 @@ impl Snake {
                 ctx,
                 graphics::DrawMode::fill(),
                 seg.pos.into(),
-                [0.3, 0.3, 0.0, 1.0].into(),
+                graphics::Color::new(0.3, 0.3, 0.0, 1.0),
             )?;
-            graphics::draw(ctx, &rectangle, (ggez::mint::Point2 { x: 0.0, y: 0.0 },))?;
+            graphics::draw(ctx, &rectangle, graphics::DrawParam::default())?;
         }
         // And then we do the same for the head, instead making it fully red to distinguish it.
         let rectangle = graphics::Mesh::new_rectangle(
@@ -367,7 +357,7 @@ impl Snake {
             self.head.pos.into(),
             [1.0, 0.5, 0.0, 1.0].into(),
         )?;
-        graphics::draw(ctx, &rectangle, (ggez::mint::Point2 { x: 0.0, y: 0.0 },))?;
+        graphics::draw(ctx, &rectangle, graphics::DrawParam::default())?;
         Ok(())
     }
 }
@@ -392,17 +382,26 @@ impl GameState {
     pub fn new() -> Self {
         // First we put our snake a quarter of the way across our grid in the x axis
         // and half way down the y axis. This works well since we start out moving to the right.
-        let snake_pos = (GRID_SIZE.0 / 4, GRID_SIZE.1 / 2).into();
+        let snake_pos = GridPosition::new(GRID_SIZE.0 / 4, GRID_SIZE.1 / 2);
         // Then we choose a random place to put our piece of food using the helper we made
         // earlier.
-        let food_pos = GridPosition::random(GRID_SIZE.0, GRID_SIZE.1);
+        let food_pos = GridPosition::random();
 
-        GameState {
+        Self {
             snake: Snake::new(snake_pos),
             food: Food::new(food_pos),
             gameover: false,
             last_update: Instant::now(),
         }
+    }
+
+    pub fn generate_food(&mut self) {
+        self.food.pos = loop {
+            let new_food_pos = GridPosition::random();
+            if !self.snake.body.contains(&Segment::new(new_food_pos)) {
+                break new_food_pos;
+            }
+        };
     }
 }
 
@@ -427,8 +426,7 @@ impl event::EventHandler for GameState {
                         // If it ate a piece of food, we randomly select a new position for our piece of food
                         // and move it to this new position.
                         Ate::Food => {
-                            let new_food_pos = GridPosition::random(GRID_SIZE.0, GRID_SIZE.1);
-                            self.food.pos = new_food_pos;
+                            self.generate_food();
                         }
                         // If it ate itself, we set our gameover state to true.
                         Ate::Itself => {
@@ -447,7 +445,7 @@ impl event::EventHandler for GameState {
     /// draw is where we should actually render the game's current state.
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
         // First we clear the screen to a nice (well, maybe pretty glaring ;)) green
-        graphics::clear(ctx, [0.0, 1.0, 0.0, 1.0].into());
+        graphics::clear(ctx, graphics::Color::new(0.0, 1.0, 0.0, 1.0));
         // Then we tell the snake and the food to draw themselves
         self.snake.draw(ctx)?;
         self.food.draw(ctx)?;
