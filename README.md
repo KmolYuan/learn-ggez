@@ -10,6 +10,10 @@ Ubuntu:
 sudo apt install -y libalsaplayer-dev libudev-dev libasound2-dev
 ```
 
+Windows:
+
+None.
+
 ## Startup
 
 ```bash
